@@ -4,14 +4,38 @@ from django.views.generic.detail import DetailView
 from django.views import View
 from django.http import HttpResponse
 from django.contrib import messages
+from django.db.models import Q
+
 from . import models
+from perfil.models import Perfil
 
 
 class ListaProdutos(ListView):
     model = models.Produto
     template_name = 'produto/lista.html'
-    context_object_name = 'produto'
+    context_object_name = 'produtos'
     paginate_by = 10
+    ordering = ['-id']
+
+
+class Busca(ListaProdutos):
+    def get_queryset(self, *args, **kwargs):
+        termo = self.request.GET.get('termo') or self.request.session['termo']
+        qs = super().get_queryset(*args, **kwargs)
+
+        if not termo:
+            return qs
+
+        self.request.session['termo'] = termo
+
+        qs = qs.filter(
+            Q(nome__icontains=termo) |
+            Q(descricao_curta__icontains=termo) |
+            Q(descricao_longa__icontains=termo)
+        )
+
+        self.request.session.save()
+        return qs
 
 
 class DetalheProduto(DetailView):
@@ -62,7 +86,7 @@ class AdicionarAoCarrinho(View):
             return redirect(http_referer)
 
         if not self.request.session.get('carrinho'):
-            self.request.session['carrimjo'] = {}
+            self.request.session['carrinho'] = {}
             self.request.session.save()
 
         carrinho = self.request.session['carrinho']
@@ -75,16 +99,16 @@ class AdicionarAoCarrinho(View):
                 messages.warning(
                     self.request,
                     f'Estoque insuficiente para {quantidade_carrinho}x no '
-                    f'produto "{produto_nome}".Adicionamos {variacao_estoque}\
-                    x no seu carrinho.'
+                    f'produto "{produto_nome}". Adicionamos {variacao_estoque}x '
+                    f'no seu carrinho.'
                 )
                 quantidade_carrinho = variacao_estoque
 
             carrinho[variacao_id]['quantidade'] = quantidade_carrinho
             carrinho[variacao_id]['preco_quantitativo'] = preco_unitario * \
                 quantidade_carrinho
-            carrinho[variacao_id]['preco_quantitativo_promocional'] = \
-                preco_unitario_promocional * quantidade_carrinho
+            carrinho[variacao_id]['preco_quantitativo_promocional'] = preco_unitario_promocional * \
+                quantidade_carrinho
         else:
             carrinho[variacao_id] = {
                 'produto_id': produto_id,
@@ -97,7 +121,7 @@ class AdicionarAoCarrinho(View):
                 'preco_quantitativo_promocional': preco_unitario_promocional,
                 'quantidade': 1,
                 'slug': slug,
-                'imagem': imagem
+                'imagem': imagem,
             }
 
         self.request.session.save()
@@ -105,7 +129,7 @@ class AdicionarAoCarrinho(View):
         messages.success(
             self.request,
             f'Produto {produto_nome} {variacao_nome} adicionado ao seu '
-            f'carrinho {carrinho[variacao_id]["quantidade"]}.'
+            f'carrinho {carrinho[variacao_id]["quantidade"]}x.'
         )
 
         return redirect(http_referer)
@@ -132,7 +156,7 @@ class RemoverDoCarrinho(View):
 
         messages.success(
             self.request,
-            f'Produto {carrinho["produto_nome"]} {carrinho["variacao_nome"]}'
+            f'Produto {carrinho["produto_nome"]} {carrinho["variacao_nome"]} '
             f'removido do seu carrinho.'
         )
 
@@ -143,7 +167,11 @@ class RemoverDoCarrinho(View):
 
 class Carrinho(View):
     def get(self, *args, **kwargs):
-        return render(self.request, 'produto/carrinho.html')
+        contexto = {
+            'carrinho': self.request.session.get('carrinho', {})
+        }
+
+        return render(self.request, 'produto/carrinho.html', contexto)
 
 
 class ResumoDaCompra(View):
